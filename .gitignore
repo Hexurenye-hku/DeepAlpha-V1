@@ -1,0 +1,16 @@
+# 忽略 Python 缓存
+__pycache__/
+*.pyc
+
+# 忽略环境文件夹
+quant_env/
+env/
+venv/
+
+# 忽略数据文件 (最重要！)
+*.parquet
+*.csv
+data/
+
+# 忽略 VS Code 配置
+.vscode/
