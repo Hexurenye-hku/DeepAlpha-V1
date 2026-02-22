@@ -14,3 +14,11 @@ data/
 
 # 忽略 VS Code 配置
 .vscode/
+
+# 忽略所有图片文件
+*.png
+*.jpg
+
+# 忽略本地数据文件和文件夹
+data/
+*.parquet
