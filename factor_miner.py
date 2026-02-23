@@ -9,63 +9,32 @@ INPUT_FILE = 'data/sp500_data.parquet'
 OUTPUT_FILE = 'data/sp500_factors.parquet'
 
 # ==========================================
-<<<<<<< HEAD
 # 2. 时间序列特征 (按单只股票计算)
 # ==========================================
 def compute_time_series_factors(df):
     # A. 基础动量与均线
-=======
-# 2. 核心逻辑: 纯 Pandas 手写因子计算
-# ==========================================
-def compute_factors(df):
-    # ----------------------------------------------------
-    # A. 趋势指标 (Trend)
-    # ----------------------------------------------------
->>>>>>> cb1fab2593c0507d722e319a191847cf78c88f4f
     df['EMA_10'] = df['close'].ewm(span=10, adjust=False).mean()
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['Bias_50'] = (df['close'] / df['EMA_50']) - 1
 
-<<<<<<< HEAD
     # B. RSI (14)
-=======
-    # ----------------------------------------------------
-    # B. 动量指标 (Momentum)
-    # ----------------------------------------------------
-    # RSI (14)
->>>>>>> cb1fab2593c0507d722e319a191847cf78c88f4f
     delta = df['close'].diff()
     gain = delta.where(delta > 0, 0.0)
     loss = -delta.where(delta < 0, 0.0)
     avg_gain = gain.rolling(window=14, min_periods=1).mean()
     avg_loss = loss.rolling(window=14, min_periods=1).mean()
-<<<<<<< HEAD
     rs = avg_gain / avg_loss.replace(0, np.nan)
     df['RSI_14'] = 100 - (100 / (1 + rs))
     df['RSI_14'] = df['RSI_14'].fillna(100)
 
     # C. MACD
-=======
-    rs = avg_gain / avg_loss.replace(0, np.nan) # 防止除以0
-    df['RSI_14'] = 100 - (100 / (1 + rs))
-    df['RSI_14'] = df['RSI_14'].fillna(100) # 若无亏损，RSI 为 100
-    
-    # MACD (12, 26, 9)
->>>>>>> cb1fab2593c0507d722e319a191847cf78c88f4f
     ema_12 = df['close'].ewm(span=12, adjust=False).mean()
     ema_26 = df['close'].ewm(span=26, adjust=False).mean()
     df['MACD'] = ema_12 - ema_26
     df['MACD_signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
     df['MACD_hist'] = df['MACD'] - df['MACD_signal']
 
-<<<<<<< HEAD
     # D. 波动率 (NATR)
-=======
-    # ----------------------------------------------------
-    # C. 波动率指标 (Volatility)
-    # ----------------------------------------------------
-    # ATR (14)
->>>>>>> cb1fab2593c0507d722e319a191847cf78c88f4f
     high_low = df['high'] - df['low']
     high_close = (df['high'] - df['close'].shift()).abs()
     low_close = (df['low'] - df['close'].shift()).abs()
@@ -74,7 +43,6 @@ def compute_factors(df):
     df['NATR_14'] = df['ATR_14'] / df['close']
 
     # ----------------------------------------------------
-<<<<<<< HEAD
     # [新增] E. 中长周期动量因子 (Momentum Returns)
     # ----------------------------------------------------
     df['Ret_5D'] = df['close'].pct_change(5)
@@ -91,10 +59,6 @@ def compute_factors(df):
     df['Dist_Low_250'] = (df['close'] / rolling_low_250) - 1
 
     # 生成预测标签 (未来5天收益率)
-=======
-    # D. 生成标签 (Targets)
-    # ----------------------------------------------------
->>>>>>> cb1fab2593c0507d722e319a191847cf78c88f4f
     df['Target_5D'] = df['close'].pct_change(5).shift(-5)
     df['Target_Dir'] = (df['Target_5D'] > 0).astype(int)
 
@@ -105,7 +69,6 @@ def compute_factors(df):
 # ==========================================
 if __name__ == "__main__":
     if not os.path.exists(INPUT_FILE):
-<<<<<<< HEAD
         print(f"[Error] 输入文件不存在: {INPUT_FILE}")
         exit()
 
@@ -144,33 +107,3 @@ if __name__ == "__main__":
     print("\n[Preview] 新增横截面排名因子示例 (最后 5 行):")
     preview_cols = ['close', 'Ret_20D', 'Rank_Ret_20D', 'Rank_Dist_High_250']
     print(factors_df[preview_cols].tail())
-=======
-        print(f"[Error] 找不到输入文件: {INPUT_FILE}，请先运行 data_loader.py")
-        exit()
-
-    print("[Extract] 正在读取 Parquet 数据...")
-    df = pd.read_parquet(INPUT_FILE)
-    
-    print("[Transform] 正在计算 500 只股票的技术因子 (CPU 多核运算)...")
-    df_reset = df.reset_index()
-    
-    # 按股票代码分组计算因子
-    factors_df = df_reset.groupby('ticker', group_keys=False).apply(compute_factors)
-    
-    # 清洗无法计算的空值行（前序窗口和未来标签导致的 NaN）
-    original_len = len(factors_df)
-    factors_df = factors_df.dropna()
-    print(f"[Clean] 清除缺失值行: {original_len} -> {len(factors_df)}")
-    
-    # 恢复索引
-    if 'date' in factors_df.columns and 'ticker' in factors_df.columns:
-        factors_df = factors_df.set_index(['date', 'ticker']).sort_index()
-        
-    # 保存至本地
-    factors_df.to_parquet(OUTPUT_FILE)
-    
-    print(f"\n[Load] 因子挖掘完成！已保存至: {OUTPUT_FILE}")
-    print(f"[Check] 特征矩阵总列数: {factors_df.shape[1]}")
-    print("\n因子展示 (尾部 5 行):")
-    print(factors_df[['close', 'RSI_14', 'MACD', 'Target_5D']].tail())
->>>>>>> cb1fab2593c0507d722e319a191847cf78c88f4f
