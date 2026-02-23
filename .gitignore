@@ -22,3 +22,7 @@ data/
 # 忽略本地数据文件和文件夹
 data/
 *.parquet
+
+# 忽略模型产出文件
+models/
+*.pkl
