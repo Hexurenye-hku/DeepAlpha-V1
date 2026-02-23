@@ -43,9 +43,7 @@ python run_pipeline.py
 
 ---
 
-### Chinese Version
 
-```markdown
 # DeepAlpha-V1：机器学习量化交易系统
 
 ## 项目概览
