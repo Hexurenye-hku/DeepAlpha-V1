@@ -1,8 +1,7 @@
 
 ---
 
-# DeepAlpha-V1（BoostAlpha-V1）
-
+# DeepAlpha-V1
 **一个基于机器学习的端到端 S&P 500 量化交易系统**
 **An End-to-End Machine Learning Quantitative Trading System for S&P 500**
 
