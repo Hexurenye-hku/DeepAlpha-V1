@@ -3,11 +3,13 @@ import pandas as pd
 import os
 import requests  # <--- 新增这一行！
 
+import datetime
+
 # ==========================================
 # 1. 配置区域 (Configuration)
 # ==========================================
 START_DATE = '2020-01-01'
-END_DATE = '2025-01-01'
+END_DATE = (datetime.date.today() + datetime.timedelta(days=1)).strftime('%Y-%m-%d')
 DATA_PATH = 'data'
 PARQUET_FILE = f"{DATA_PATH}/sp500_data.parquet"
 
