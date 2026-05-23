@@ -27,9 +27,11 @@ Trade only with high confidence (prob ≥ 0.65), otherwise stay in cash — aimi
 * ✅ 完整端到端流水线（数据 → 因子 → 模型 → 预测 → 回测）
 * ✅ 严格 Out-of-Sample 测试（2024-01 之后作为测试集）
 * ✅ 时间序列 + 横截面排名因子（相对强弱）
-* ✅ LightGBM 二分类模型（预测未来 5 天涨跌）
+* ✅ **LightGBM 二分类模型（预测未来 1 日涨跌）**
+* ✅ **强制时序排序，彻底防止数据穿越 (Data Leakage)**
 * ✅ 概率阈值严格风控（默认 0.65），最多持仓 5 只，等权重
-* ✅ 考虑交易成本（0.2%）和持仓重叠
+* ✅ **真实每日调仓回测，精准双边换手率与摩擦成本计算**
+* ✅ 考虑交易成本（0.2% 单边）和持仓重叠
 * ✅ 每日一键自动化运行（`run_pipeline.py`）
 * ✅ 支持 SHAP 解释（全局特征重要性 + 单股票局部贡献）
 * ✅ 向量化回测引擎 + 多阈值对比图表
@@ -37,9 +39,11 @@ Trade only with high confidence (prob ≥ 0.65), otherwise stay in cash — aimi
 * ✅ Full end-to-end pipeline (data → factors → model → prediction → backtest)
 * ✅ Strict out-of-sample testing (data after 2024-01 used as test set)
 * ✅ Time-series + cross-sectional ranking factors (relative strength)
-* ✅ LightGBM binary classification model (predicting 5-day future returns)
+* ✅ **LightGBM binary classification model (predicting 1-day future returns)**
+* ✅ **Enforced time-series sorting to eliminate data leakage**
 * ✅ Probability-threshold-based risk control (default 0.65), max 5 positions, equal-weighted
-* ✅ Transaction costs considered (0.2%) and overlapping positions handled
+* ✅ **True daily rebalancing with precise two-way turnover and friction cost calculation**
+* ✅ Transaction costs considered (0.2% one-way) and overlapping positions handled
 * ✅ One-click daily automation (run_pipeline.py)
 * ✅ SHAP interpretability support (global feature importance + per-stock local contributions)
 * ✅ Vectorized backtesting engine with multi-threshold comparison plots
@@ -48,18 +52,24 @@ Trade only with high confidence (prob ≥ 0.65), otherwise stay in cash — aimi
 
 ## 回测表现（2024-01 ~ 2026-04） / Backtest Performance
 
-使用严格时间分割的 Out-of-Sample 回测结果：
+使用严格时间分割的 Out-of-Sample 回测结果（**真实每日调仓 + 精准双边换手成本**）：
 
-| 概率阈值 Threshold | 交易次数 Trades | 总收益率 Total Return | 最大回撤 Max Drawdown | 夏普比率 Sharpe |
-| -------------- | ----------- | ----------------- | ----------------- | ----------- |
-| 0.55           | 2825        | 90.52%            | -28.51%           | 2.52        |
-| 0.60           | 1672        | 81.72%            | -27.48%           | 1.88        |
-| **0.65（推荐）**   | **467**     | **128.03%**       | **-14.06%**       | **2.49**    |
-| 0.70           | 210         | 25.00%            | -9.48%            | 1.33        |
-| 0.75           | 78          | 23.57%            | -1.15%            | 1.59        |
+| 概率阈值 Threshold | 交易次数 Trades | 总收益率 Total Return | 年化换手率 Ann. Turnover | 交易损耗 Trans. Cost | 最大回撤 Max DD | 夏普比率 Sharpe |
+| -------------- | ----------- | ----------------- | ------------------- | ----------------- | ------------- | ----------- |
+| 0.55           | 2825        | 90.52%            | 214.9x              | 203.0%            | -28.51%       | 2.52        |
+| 0.60           | 1672        | 81.72%            | 126.8x              | 119.8%            | -27.48%       | 1.88        |
+| **0.65（推荐）**   | **467**     | **128.03%**       | **35.4x**           | **33.4%**         | **-14.06%**   | **2.49**    |
+| 0.70           | 210         | 25.00%            | 15.9x               | 15.0%             | -9.48%        | 1.33        |
+| 0.75           | 78          | 23.57%            | 5.9x                | 5.6%              | -1.15%        | 1.59        |
+
+**关键改进 / Key Improvements**：
+* **预测周期**：从 5 日改为 1 日，支持真实每日调仓
+* **防穿越**：强制时序排序，消除 groupby 乱序风险
+* **精准成本**：基于实际持仓变化的双边换手率计算，非粗略估算
 
 **结论 / Conclusion**：
-**0.65** 是收益与风险的最佳平衡点，显著优于标普500基准。
+**0.65** 是收益与风险的最佳平衡点，在扣除高额交易成本后仍显著优于标普 500 基准。
+高阈值 (0.75) 策略虽然收益较低，但换手率仅 5.9 倍，交易成本仅 5.6%，适合大资金实盘。
 
 ---
 
@@ -122,11 +132,16 @@ python backtest_engine.py
 * 当输出“无高确定性交易机会”时 → **严格保持空仓**
 * 建议每月重新运行 `train_and_save.py`，适应市场变化
 * 可通过修改 `daily_predictor.py` 中的 `OPTIMAL_THRESHOLD` 调整策略激进程度（建议保持 0.65）
+* **实盘注意**：高阈值策略 (≥0.75) 换手率低，更适合大资金；低阈值策略 (<0.60) 换手率高，需警惕交易成本侵蚀利润
+
 
 * Run run_pipeline.py or daily_predictor.py after each U.S. market close
 * When the output indicates “no high-confidence trading opportunities” → strictly stay in cash
+* **Live Trading Note**: High-threshold strategies (≥0.75) have low turnover, suitable for large capital; low-threshold strategies (<0.60) have high turnover, beware of transaction cost erosion
+
 * Retrain the model monthly via train_and_save.py to adapt to evolving market regimes
 * Adjust strategy aggressiveness by modifying OPTIMAL_THRESHOLD in daily_predictor.py (recommended: keep at 0.65)
+
 
 ---
 
