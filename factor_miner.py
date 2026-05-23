@@ -12,6 +12,11 @@ OUTPUT_FILE = 'data/sp500_factors.parquet'
 # 2. 时间序列特征 (按单只股票计算)
 # ==========================================
 def compute_time_series_factors(df):
+    # === 任务 1: 强制时序排序 (Enforce Time-Series Sorting) ===
+    # 防止 groupby('ticker') 导致的时序乱序与数据穿越
+    # Sort by date to ensure strict time-series order within each ticker group
+    df = df.sort_values('date').reset_index(drop=True)
+    
     # A. 基础动量与均线
     df['EMA_10'] = df['close'].ewm(span=10, adjust=False).mean()
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
@@ -52,15 +57,27 @@ def compute_time_series_factors(df):
     # ----------------------------------------------------
     # [新增] F. 价格极值锚点 (Price Anchors)
     # ----------------------------------------------------
-    # 距离过去250天(一年)最高点和最低点的百分比
+    # 距离过去 250 天 (一年) 最高点和最低点的百分比
     rolling_high_250 = df['high'].rolling(window=250, min_periods=1).max()
     rolling_low_250 = df['low'].rolling(window=250, min_periods=1).min()
     df['Dist_High_250'] = (df['close'] / rolling_high_250) - 1
     df['Dist_Low_250'] = (df['close'] / rolling_low_250) - 1
 
-    # 生成预测标签 (未来5天收益率)
+    # ----------------------------------------------------
+    # [关键] 生成预测标签 (Prediction Targets)
+    # 时间对齐说明 (Time Alignment):
+    #   - Target_5D: T 时刻的特征对应 T→T+5 的 5 日收益
+    #     Formula: (Close[T+5] - Close[T]) / Close[T]
+    #   - Target_1D: T 时刻的特征对应 T→T+1 的 1 日收益 (用于真实每日回测)
+    #     Formula: (Close[T+1] - Close[T]) / Close[T]
+    #   - shift(-N) 确保特征计算 (使用 T 日及之前数据) 与 Target 严格错开
+    # ----------------------------------------------------
+    # 5-day forward return for multi-day prediction
     df['Target_5D'] = df['close'].pct_change(5).shift(-5)
     df['Target_Dir'] = (df['Target_5D'] > 0).astype(int)
+    
+    # 1-day forward return for daily rebalancing backtest (新增 1 日预测标签)
+    df['Target_1D'] = df['close'].pct_change(1).shift(-1)
 
     return df
 
@@ -69,7 +86,7 @@ def compute_time_series_factors(df):
 # ==========================================
 if __name__ == "__main__":
     if not os.path.exists(INPUT_FILE):
-        print(f"[Error] 输入文件不存在: {INPUT_FILE}")
+        print(f"[Error] 输入文件不存在：{INPUT_FILE}")
         exit()
 
     print("[1/3] 读取 Parquet 原始数据...")
@@ -91,17 +108,21 @@ if __name__ == "__main__":
     # 清洗空值行（均线计算、长周期收益率以及标签平移产生的空值）
     original_len = len(factors_df)
     factors_df = factors_df.dropna()
-    print(f"[Clean] 剔除空值行: {original_len} -> {len(factors_df)}")
+    print(f"[Clean] 剔除空值行：{original_len} -> {len(factors_df)}")
     
-    # 恢复多重索引
+    # 恢复多重索引 (先转换类型再 set_index 以避免内存峰值)
     if 'date' in factors_df.columns and 'ticker' in factors_df.columns:
+        # Convert numeric columns to float32 one by one to reduce memory footprint
+        for col in factors_df.columns:
+            if col not in ['date', 'ticker'] and factors_df[col].dtype == np.float64:
+                factors_df[col] = factors_df[col].astype(np.float32)
         factors_df = factors_df.set_index(['date', 'ticker']).sort_index()
         
     # 保存覆盖原文件
     factors_df.to_parquet(OUTPUT_FILE)
     
-    print(f"\n[Success] 因子挖掘 V2 完成！已保存至: {OUTPUT_FILE}")
-    print(f"[Info] 当前特征矩阵总列数: {factors_df.shape[1]}")
+    print(f"\n[Success] 因子挖掘 V2 完成！已保存至：{OUTPUT_FILE}")
+    print(f"[Info] 当前特征矩阵总列数：{factors_df.shape[1]}")
     
     # 打印验证横截面排名
     print("\n[Preview] 新增横截面排名因子示例 (最后 5 行):")
