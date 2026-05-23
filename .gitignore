@@ -1,28 +1,58 @@
-# 忽略 Python 缓存
-__pycache__/
+```
+# Compiled and build artifacts
 *.pyc
+__pycache__/
 
-# 忽略环境文件夹
-quant_env/
-env/
+# Dependencies
+.venv/
 venv/
+pip-wheel-metadata/
 
-# 忽略数据文件 (最重要！)
+# Data files
 *.parquet
-*.csv
-data/
-
-# 忽略 VS Code 配置
-.vscode/
-
-# 忽略所有图片文件
-*.png
-*.jpg
-
-# 忽略本地数据文件和文件夹
-data/
-*.parquet
-
-# 忽略模型产出文件
-models/
 *.pkl
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Editors
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+.coverage
+coverage/
+htmlcov/
+
+# Python specific
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+```

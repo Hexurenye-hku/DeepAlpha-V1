@@ -17,35 +17,44 @@ PARQUET_FILE = f"{DATA_PATH}/sp500_data.parquet"
 # 2. 获取 S&P 500 名单 (Web Scraping - 修复版)
 # ==========================================
 def get_sp500_tickers():
-    print("🌐 正在从维基百科抓取 S&P 500 成分股名单...")
-    url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+    print("🌐 正在获取 S&P 500 成分股名单...")
     
-    # 🕵️ 关键修复：伪装成浏览器 (User-Agent)
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    }
-    
+    # 方案 1: 从 GitHub 获取维护好的 CSV (最可靠)
     try:
-        # 1. 先用 requests 带上“身份证”去下载网页源码
-        r = requests.get(url, headers=headers)
-        
-        # 2. 把源码喂给 pandas 解析
-        table = pd.read_html(r.text)
-        df_table = table[0]
-        
-        tickers = df_table['Symbol'].tolist()
-        
-        # 修正代码格式
-        tickers = [t.replace('.', '-') for t in tickers]
-        
-        print(f"✅ 成功获取 {len(tickers)} 只股票代码。")
+        url = 'https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv'
+        df = pd.read_csv(url)
+        tickers = df['Symbol'].tolist()
+        print(f"✅ 成功从 GitHub 获取 {len(tickers)} 只股票代码。")
         return tickers
-        
     except Exception as e:
-        print(f"❌ 抓取失败: {e}")
-        print("⚠️ 启动备用名单 (Tech Stocks Only)...")
-        # 如果还是失败，返回一个备用的核心列表，保证流程能跑通
-        return ['AAPL', 'MSFT', 'GOOG', 'AMZN', 'NVDA', 'TSLA', 'META', 'AMD', 'INTC', 'QCOM', 'JPM', 'BAC', 'GS']
+        print(f"⚠️ GitHub 源失败：{e}")
+    
+    # 方案 2: 尝试维基百科 (需要稳定的网络环境)
+    try:
+        url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
+        r = requests.get(url, headers=headers, timeout=10)
+        
+        if r.status_code == 200:
+            from io import StringIO
+            tables = pd.read_html(StringIO(r.text))
+            for table in tables:
+                if 'Symbol' in table.columns or 'Ticker' in table.columns:
+                    col = 'Symbol' if 'Symbol' in table.columns else 'Ticker'
+                    tickers = table[col].tolist()
+                    tickers = [t.replace('.', '-') for t in tickers]
+                    print(f"✅ 成功从维基百科抓取 {len(tickers)} 只股票代码。")
+                    return tickers
+    except Exception as e:
+        print(f"⚠️ 维基百科源失败：{e}")
+    
+    # 方案 3: 备用核心股票列表
+    print("⚠️ 启动备用名单 (Tech Stocks Only)...")
+    return ['AAPL', 'MSFT', 'GOOG', 'AMZN', 'NVDA', 'TSLA', 'META', 'AMD', 'INTC', 'QCOM', 'JPM', 'BAC', 'GS']
+
 
 # ==========================================
 # 3. 核心 ETL 逻辑

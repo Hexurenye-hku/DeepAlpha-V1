@@ -11,7 +11,9 @@ def run_grid_search():
     print("[1/4] 读取数据与特征工程...")
     df = pd.read_parquet(INPUT_FILE)
     
-    exclude_cols = ['Target_5D', 'Target_Dir', 'close', 'high', 'low', 'open', 'volume']
+    # === 任务 2: 标签切换 (Label Switch) ===
+    # 从 Target_5D 全面替换为 Target_1D，支持真实每日回测
+    exclude_cols = ['Target_5D', 'Target_Dir', 'Target_1D', 'close', 'high', 'low', 'open', 'volume']
     feature_cols = [c for c in df.columns if c not in exclude_cols]
 
     print("[2/4] 训练 LightGBM 模型 (多核并行)...")
@@ -20,7 +22,7 @@ def run_grid_search():
     test_df = df[df['date'] >= '2024-01-01'].copy()
 
     X_train = train_df[feature_cols]
-    y_train = train_df['Target_Dir']
+    y_train = train_df['Target_Dir']  # 仍使用 5 日方向作为训练标签
     X_test = test_df[feature_cols]
 
     model = lgb.LGBMClassifier(
@@ -35,23 +37,23 @@ def run_grid_search():
     print("[3/4] 生成预测信号...")
     test_df['Prob_Up'] = model.predict_proba(X_test)[:, 1]
 
-    print("[4/4] 执行阈值网格搜索 (Grid Search)...")
+    print("[4/4] 执行阈值网格搜索 (Grid Search) - 每日等权调仓模式...")
     
     # 设定需要遍历的概率阈值列表
     thresholds = [0.55, 0.60, 0.65, 0.70, 0.75]
     MAX_POSITIONS = 5
-    COST_RATE = 0.002
-    HOLDING_DAYS = 5
+    COST_RATE = 0.002  # 单边成本 0.2%
     
     results = []
     
     plt.style.use('default')
     plt.figure(figsize=(12, 6))
     
-    # 计算大盘基准线
+    # === 计算大盘基准线 (使用 1 日收益) ===
+    # Market benchmark using true daily returns
     daily_bench = []
     for date, group in test_df.groupby('date'):
-        daily_bench.append({'date': date, 'bench_ret': group['Target_5D'].mean() / HOLDING_DAYS})
+        daily_bench.append({'date': date, 'bench_ret': group['Target_1D'].mean()})
     bench_df = pd.DataFrame(daily_bench).set_index('date').sort_index()
     bench_df['cumulative_ret'] = (1 + bench_df['bench_ret']).cumprod()
     plt.plot(bench_df.index, bench_df['cumulative_ret'], label='Market Benchmark', color='gray', linestyle='--')
@@ -61,17 +63,52 @@ def run_grid_search():
         daily_records = []
         trade_count = 0
         
+        # 换手率计算相关变量
+        prev_positions = set()  # T-1 日的持仓股票代码集合
+        total_turnover = 0.0    # 累计双边换手次数 (cumulative two-way turnover)
+        
         for date, group in test_df.groupby('date'):
             signals = group[group['Prob_Up'] > threshold]
             
             if len(signals) > 0:
                 top_picks = signals.nlargest(MAX_POSITIONS, 'Prob_Up')
-                basket_return = top_picks['Target_5D'].mean() - COST_RATE
-                daily_contribution = basket_return / HOLDING_DAYS
-                daily_records.append({'date': date, 'strategy_ret': daily_contribution})
+                # 数据已 reset_index，ticker 是普通列
+                current_positions = set(top_picks['ticker'].tolist())
+                
+                # === 任务 2: 每日真实收益计算 (True Daily Return) ===
+                # 计算这 N 只股票当天的真实 1 日平均收益
+                # Calculate the true 1-day average return of the selected basket
+                daily_gross_return = top_picks['Target_1D'].mean()
+                
+                # === 任务 2: 精准摩擦成本扣除 (Precise Friction Deduction) ===
+                # 计算当日实际换手比例 (Turnover Ratio)
+                # Formula: Turnover_t = |Position_t - Position_{t-1}| / 2
+                # 对称差集元素个数 / (2 * 最大持仓数) = 归一化换手比例
+                positions_changed = len(current_positions.symmetric_difference(prev_positions))
+                turnover_ratio = positions_changed / (2.0 * MAX_POSITIONS)
+                
+                # 当日净收益 = 毛收益 - (换手比例 * 2 * 单边成本)
+                # Net Return = Gross Return - (Turnover Ratio * 2 * Single-side Cost)
+                # 注意：换手部分必须扣除双边成本 (Round-trip Cost)
+                daily_net_return = daily_gross_return - (turnover_ratio * 2 * COST_RATE)
+                
+                # 更新持仓记录
+                prev_positions = current_positions
+                
+                daily_records.append({'date': date, 'strategy_ret': daily_net_return})
                 trade_count += len(top_picks)
             else:
-                daily_records.append({'date': date, 'strategy_ret': 0.0})
+                # 无信号时，持仓清空，计算清仓换手成本
+                # When no signal, clear all positions and calculate liquidation turnover
+                positions_changed = len(prev_positions)
+                turnover_ratio = positions_changed / (2.0 * MAX_POSITIONS)
+                liquidation_cost = turnover_ratio * 2 * COST_RATE
+                
+                total_turnover += turnover_ratio
+                prev_positions = set()
+                
+                # 清仓日收益为负的摩擦成本
+                daily_records.append({'date': date, 'strategy_ret': -liquidation_cost})
 
         bt_df = pd.DataFrame(daily_records).set_index('date').sort_index()
         bt_df['cumulative_ret'] = (1 + bt_df['strategy_ret']).cumprod()
@@ -87,13 +124,25 @@ def run_grid_search():
         annual_volatility = bt_df['strategy_ret'].std() * np.sqrt(252)
         sharpe_ratio = (annual_return - 0.03) / annual_volatility if annual_volatility != 0 else 0
         
+        # === 换手率与交易损耗计算 (Turnover & Transaction Cost Calculation) ===
+        # 年化换手率 = 总换手比例 * (252 / 交易日数)
+        # Annualized Turnover = Total Turnover Ratio * (252 / Trading Days)
+        trading_days = len(bt_df)
+        annual_turnover = total_turnover * (252 / trading_days)
+        
+        # 总交易损耗 = 总换手比例 * 2 * 单边成本
+        # Total Transaction Cost = Total Turnover Ratio * 2 * Single-side Cost
+        total_transaction_cost = total_turnover * 2 * COST_RATE
+        
         # 记录该阈值下的表现
         results.append({
             'Threshold': threshold,
             'Trades': trade_count,
             'Total Return': f"{total_return:.2%}",
             'Max Drawdown': f"{max_drawdown:.2%}",
-            'Sharpe': round(sharpe_ratio, 2)
+            'Sharpe': round(sharpe_ratio, 2),
+            'Ann. Turnover': f"{annual_turnover:.1f}x",
+            'Trans. Cost': f"{total_transaction_cost:.2%}"
         })
         
         # 绘制资金曲线
