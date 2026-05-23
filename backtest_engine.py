@@ -11,10 +11,43 @@ def run_grid_search():
     print("[1/4] 读取数据与特征工程...")
     df = pd.read_parquet(INPUT_FILE)
     
-    # === 任务 2: 标签切换 (Label Switch) ===
-    # 从 Target_5D 全面替换为 Target_1D，支持真实每日回测
+    # === 任务 1: 特征工程提纯 (Feature Purification) ===
+    # 严格白名单/黑名单机制，剥离市场 Beta，仅保留选股 Alpha
+    # Strict Whitelist/Blacklist mechanism to strip Market Beta and keep only Stock Selection Alpha
+    
+    # 黑名单：剔除绝对价格、绝对均线、绝对收益率、原始量价
+    # Blacklist: Exclude absolute prices, moving averages, returns, and raw OHLCV
+    blacklist = [
+        'Target_5D', 'Target_Dir', 'Target_1D', 
+        'close', 'high', 'low', 'open', 'volume',
+        'EMA_10', 'EMA_50', 
+        'Ret_5D', 'Ret_20D', 'Ret_60D',
+        'Dist_High_250', 'Dist_Low_250'
+    ]
+    
+    # 白名单筛选逻辑：
+    # 1. 以 Rank_ 开头的横截面排名特征 (Cross-sectional Rank Features)
+    # 2. 无量纲的相对指标 (Dimensionless Relative Indicators)
+    whitelist_prefix = ['Rank_']
+    whitelist_relative = ['Bias_50', 'NATR_14', 'MACD_hist', 'RSI_14']
+    
+    feature_cols = []
+    for col in df.columns:
+        if col in blacklist:
+            continue
+        # 检查是否在白名单前缀或具体相对指标中
+        is_rank_feature = any(col.startswith(prefix) for prefix in whitelist_prefix)
+        is_relative_feature = col in whitelist_relative
+        
+        if is_rank_feature or is_relative_feature:
+            feature_cols.append(col)
+    
+    # 打印最终入选特征以供核对
+    # Print final selected features for verification
+    print(f"   [Feature Purification] 最终入选 {len(feature_cols)} 个特征:")
+    print(f"   {feature_cols}")
+    
     exclude_cols = ['Target_5D', 'Target_Dir', 'Target_1D', 'close', 'high', 'low', 'open', 'volume']
-    feature_cols = [c for c in df.columns if c not in exclude_cols]
 
     print("[2/4] 训练 LightGBM 模型 (多核并行)...")
     df = df.reset_index()
@@ -43,6 +76,7 @@ def run_grid_search():
     thresholds = [0.55, 0.60, 0.65, 0.70, 0.75]
     MAX_POSITIONS = 5
     COST_RATE = 0.002  # 单边成本 0.2%
+    BUFFER = 0.05      # 持仓缓冲带 5% (Hysteresis Buffer / Position Stickiness)
     
     results = []
     
@@ -68,19 +102,39 @@ def run_grid_search():
         total_turnover = 0.0    # 累计双边换手次数 (cumulative two-way turnover)
         
         for date, group in test_df.groupby('date'):
-            signals = group[group['Prob_Up'] > threshold]
+            # === 任务 2: 引入持仓缓冲带机制 (Hysteresis Buffer / Position Stickiness) ===
+            # 防止股票在阈值边缘微小波动时频繁换手
+            # Prevent frequent turnover when stocks fluctuate marginally around the threshold
             
-            if len(signals) > 0:
-                top_picks = signals.nlargest(MAX_POSITIONS, 'Prob_Up')
-                # 数据已 reset_index，ticker 是普通列
+            # 1. 新买入条件：Prob_Up > threshold
+            # New Entry: Must satisfy Prob_Up > threshold
+            new_entry_signals = group[group['Prob_Up'] > threshold]
+            
+            # 2. 继续持有条件：已在持仓中且 Prob_Up > threshold - BUFFER
+            # Retention: Already in portfolio AND Prob_Up > threshold - BUFFER
+            retention_signals = group[
+                (group['ticker'].isin(prev_positions)) & 
+                (group['Prob_Up'] > (threshold - BUFFER))
+            ]
+            
+            # 3. 合并新老股票，按 Prob_Up 降序排列，截取前 MAX_POSITIONS 只
+            # Merge new and retained stocks, sort by Prob_Up descending, take top MAX_POSITIONS
+            if len(new_entry_signals) > 0 or len(retention_signals) > 0:
+                # 合并并去重 (merge and deduplicate)
+                combined_signals = pd.concat([new_entry_signals, retention_signals]).drop_duplicates(subset='ticker')
+                
+                # 按概率降序排序 (sort by probability descending)
+                top_picks = combined_signals.nlargest(MAX_POSITIONS, 'Prob_Up')
+                
+                # 获取最终持仓代码集合 (get final position set)
                 current_positions = set(top_picks['ticker'].tolist())
                 
-                # === 任务 2: 每日真实收益计算 (True Daily Return) ===
+                # === 每日真实收益计算 (True Daily Return) ===
                 # 计算这 N 只股票当天的真实 1 日平均收益
                 # Calculate the true 1-day average return of the selected basket
                 daily_gross_return = top_picks['Target_1D'].mean()
                 
-                # === 任务 2: 精准摩擦成本扣除 (Precise Friction Deduction) ===
+                # === 精准摩擦成本扣除 (Precise Friction Deduction) ===
                 # 计算当日实际换手比例 (Turnover Ratio)
                 # Formula: Turnover_t = |Position_t - Position_{t-1}| / 2
                 # 对称差集元素个数 / (2 * 最大持仓数) = 归一化换手比例
